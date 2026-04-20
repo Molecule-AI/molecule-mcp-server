@@ -145,6 +145,8 @@ src/
 
 ## Known Issues
 
+See `known-issues.md` at the repo root for the full tracked list.
+
 **File a GitHub issue first — do not silently patch known problems.**
 
 Before opening an issue, check:

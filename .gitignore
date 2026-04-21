@@ -19,3 +19,8 @@
 # Workspace auth tokens
 .auth-token
 .auth_token
+
+# Node.js dependencies (installed at runtime, not part of repo)
+node_modules/
+dist/
+build/

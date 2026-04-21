@@ -1,49 +1,89 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { apiCall, platformGet, toMcpResult } from "../api.js";
+import { validate } from "../utils/validation.js";
 
-export async function handleSetSecret(params: { workspace_id: string; key: string; value: string }) {
-  const { workspace_id, key, value } = params;
-  const data = await apiCall("POST", `/workspaces/${workspace_id}/secrets`, { key, value });
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
+
+const SetSecretSchema = z.object({
+  workspace_id: z.string().describe("Workspace ID"),
+  key: z.string().describe("Secret key (e.g., ANTHROPIC_API_KEY)"),
+  value: z.string().describe("Secret value"),
+});
+export type SetSecretParams = z.infer<typeof SetSecretSchema>;
+
+const ListSecretsSchema = z.object({
+  workspace_id: z.string().describe("Workspace ID"),
+});
+export type ListSecretsParams = z.infer<typeof ListSecretsSchema>;
+
+const DeleteSecretSchema = z.object({
+  workspace_id: z.string().describe("Workspace ID"),
+  key: z.string().describe("Secret key"),
+});
+export type DeleteSecretParams = z.infer<typeof DeleteSecretSchema>;
+
+const SetGlobalSecretSchema = z.object({
+  key: z.string().describe("Secret key (e.g., GITHUB_TOKEN)"),
+  value: z.string().describe("Secret value"),
+});
+export type SetGlobalSecretParams = z.infer<typeof SetGlobalSecretSchema>;
+
+const DeleteGlobalSecretSchema = z.object({
+  key: z.string().describe("Secret key"),
+});
+export type DeleteGlobalSecretParams = z.infer<typeof DeleteGlobalSecretSchema>;
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+export async function handleSetSecret(args: unknown): Promise<ReturnType<typeof toMcpResult>> {
+  const params = validate(args, SetSecretSchema);
+  const data = await apiCall("POST", `/workspaces/${params.workspace_id}/secrets`, { key: params.key, value: params.value });
   return toMcpResult(data);
 }
 
-export async function handleListSecrets(params: { workspace_id: string }) {
+export async function handleListSecrets(args: unknown): Promise<ReturnType<typeof toMcpResult>> {
+  const params = validate(args, ListSecretsSchema);
   const data = await platformGet(`/workspaces/${params.workspace_id}/secrets`);
   return toMcpResult(data);
 }
 
-export async function handleDeleteSecret(params: { workspace_id: string; key: string }) {
-  const { workspace_id, key } = params;
-  const data = await apiCall("DELETE", `/workspaces/${workspace_id}/secrets/${encodeURIComponent(key)}`);
+export async function handleDeleteSecret(args: unknown): Promise<ReturnType<typeof toMcpResult>> {
+  const params = validate(args, DeleteSecretSchema);
+  const data = await apiCall("DELETE", `/workspaces/${params.workspace_id}/secrets/${encodeURIComponent(params.key)}`);
   return toMcpResult(data);
 }
 
-export async function handleListGlobalSecrets() {
+export async function handleListGlobalSecrets(): Promise<ReturnType<typeof toMcpResult>> {
   const data = await platformGet("/settings/secrets");
   return toMcpResult(data);
 }
 
-export async function handleSetGlobalSecret(params: { key: string; value: string }) {
-  const { key, value } = params;
-  const data = await apiCall("PUT", "/settings/secrets", { key, value });
+export async function handleSetGlobalSecret(args: unknown): Promise<ReturnType<typeof toMcpResult>> {
+  const params = validate(args, SetGlobalSecretSchema);
+  const data = await apiCall("PUT", "/settings/secrets", { key: params.key, value: params.value });
   return toMcpResult(data);
 }
 
-export async function handleDeleteGlobalSecret(params: { key: string }) {
+export async function handleDeleteGlobalSecret(args: unknown): Promise<ReturnType<typeof toMcpResult>> {
+  const params = validate(args, DeleteGlobalSecretSchema);
   const data = await apiCall("DELETE", `/settings/secrets/${params.key}`);
   return toMcpResult(data);
 }
+
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
 
 export function registerSecretTools(srv: McpServer) {
   srv.tool(
     "set_secret",
     "Set an API key or environment variable for a workspace",
-    {
-      workspace_id: z.string().describe("Workspace ID"),
-      key: z.string().describe("Secret key (e.g., ANTHROPIC_API_KEY)"),
-      value: z.string().describe("Secret value"),
-    },
+    { workspace_id: z.string().describe("Workspace ID"), key: z.string().describe("Secret key (e.g., ANTHROPIC_API_KEY)"), value: z.string().describe("Secret value") },
     handleSetSecret
   );
 
@@ -57,7 +97,7 @@ export function registerSecretTools(srv: McpServer) {
   srv.tool(
     "delete_secret",
     "Delete a secret from a workspace",
-    { workspace_id: z.string(), key: z.string() },
+    { workspace_id: z.string().describe("Workspace ID"), key: z.string().describe("Secret key") },
     handleDeleteSecret
   );
 
@@ -66,10 +106,7 @@ export function registerSecretTools(srv: McpServer) {
   srv.tool(
     "set_global_secret",
     "Set a global secret (available to all workspaces)",
-    {
-      key: z.string().describe("Secret key (e.g., GITHUB_TOKEN)"),
-      value: z.string().describe("Secret value"),
-    },
+    { key: z.string().describe("Secret key (e.g., GITHUB_TOKEN)"), value: z.string().describe("Secret value") },
     handleSetGlobalSecret
   );
 

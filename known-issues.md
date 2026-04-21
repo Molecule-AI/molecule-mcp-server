@@ -27,8 +27,8 @@ Format per entry:
 
 ## KI-001 — No structured logging; all errors go to console.log
 
-**File:** `src/index.ts` (and likely all tool handlers)  
-**Status:** Identified  
+**File:** `src/index.ts` (and likely all tool handlers)
+**Status:** Identified
 **Severity:** Medium
 
 ### Symptom
@@ -53,8 +53,8 @@ from the platform trace header (`X-Trace-ID` or similar).
 
 ## KI-002 — Tool input schemas are not validated before passing to handlers
 
-**File:** `src/tools/*.ts` (tool handlers)  
-**Status:** Resolved  
+**File:** `src/tools/*.ts` (tool handlers)
+**Status:** Resolved
 **Severity:** High
 
 ### Resolution
@@ -67,10 +67,26 @@ this requirement. No code change required.
 
 ---
 
+## KI-003 — `test.txt` artifact left in repo root
+
+**File:** `test.txt` (root)
+**Status:** Resolved
+**Resolved in:** main branch commit `b422105` removed test.txt as part of CLAUDE.md merge.
+
+### Symptom
+A 5-byte file named `test.txt` with content `"test"` existed in the repo root.
+This was a leftover debug artifact with no legitimate purpose.
+
+### Impact
+Clutter. Could have been accidentally included in the npm package if `files` in
+`package.json` was ever set to include all non-ignored files.
+
+---
+
 ## KI-004 — No rate limiting or backpressure on platform API calls
 
-**File:** `src/api.ts`, `src/tools/*.ts`  
-**Status:** Resolved (PR: `feat/mcp-rate-limiting`)  
+**File:** `src/api.ts`, `src/tools/*.ts`
+**Status:** Resolved (PR: `feat/mcp-rate-limiting`)
 **Severity:** Medium
 
 ### Resolution
@@ -88,8 +104,8 @@ PUT, PATCH, DELETE calls continue to use `apiCall` (non-idempotent).
 
 ## KI-005 — Streaming tools do not honour cancellation signals
 
-**File:** `src/tools/` (streaming-capable tool handlers)  
-**Status:** Identified  
+**File:** `src/tools/` (streaming-capable tool handlers)
+**Status:** Identified
 **Severity:** Low
 
 ### Symptom
@@ -109,3 +125,49 @@ If the MCP server library exposes a cancellation token or abort signal,
 check it before each `ContentBlock` emission and stop cleanly (close the
 stream without error) if cancelled. Document the behaviour in the streaming
 convention in CLAUDE.md.
+
+---
+
+## KI-006 — `anyOf` schemas cause `INVALID_ARGUMENTS` on valid inputs
+
+**File:** `src/tools/plugins.ts` (and other tools with union-typed schemas)
+**Status:** Identified
+**Severity:** Medium
+
+### Symptom
+Tool `inputSchema` definitions that use JSON Schema `anyOf` to express union types
+(e.g., `anyOf: [{ type: "string" }, { type: "null" }]`) are not handled correctly by
+the MCP JSON Schema validator. Even when the actual input matches a valid branch of
+the `anyOf`, validation fails and returns `INVALID_ARGUMENTS`.
+
+### Impact
+Tools using optional or nullable fields defined with `anyOf` reject all calls,
+breaking plugin installation and other workflows that depend on those tools.
+
+### Suggested fix
+Replace `anyOf` with nullable types directly (`{ type: "string", nullable: true }`)
+or flatten the schema to use oneOf with concrete variants. Alternatively, pre-process
+the schema before passing to the validator to normalize `anyOf` into supported forms.
+
+---
+
+## KI-007 — Heartbeat cleanup fires after SSE stream closes
+
+**File:** `src/tools/remote_agents.ts` (heartbeat tool)
+**Status:** Identified
+**Severity:** Low
+
+### Symptom
+When using SSE transport, the heartbeat mechanism does not immediately clean up
+when a stream closes. A background timer or goroutine may continue sending heartbeats
+to workspaces whose SSE connections have been closed by the client.
+
+### Impact
+Orphaned heartbeat calls continue consuming platform API quota after the MCP client
+has disconnected. Over time this can cause the workspace to accumulate heartbeat
+sessions that never expire on the platform side.
+
+### Suggested fix
+Attach a cleanup function to the SSE stream `close` event. Invalidate the heartbeat
+timer when the stream ends so no further calls are made. Document the expected
+SSE session lifecycle in the streaming convention section of CLAUDE.md.

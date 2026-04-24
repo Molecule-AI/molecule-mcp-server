@@ -1,9 +1,16 @@
-// Prefer MOLECULE_URL (the canonical MCP env var), fall back to PLATFORM_URL
-// (what the workspace runtime already injects for heartbeat/register), and
-// only then to localhost:8080. Injecting MOLECULE_URL at container provision
-// is handled by platform/internal/provisioner/provisioner.go; this fallback
-// chain protects older containers and host-side users alike. Fixes #67.
+// Read the platform API base URL from environment.
+// Priority: MOLECULE_API_URL (canonical CLI/SDK env var, per platform docs)
+//
+//   > Required environment variables:
+//   >   MOLECULE_API_URL  — Control plane API base URL
+//   >   MOLECULE_RUNTIME_URL — Workspace runtime URL
+//   >   (per docs/development/constraints-and-rules.md)
+//
+// Fallbacks exist for legacy callers (MOLECULE_URL, PLATFORM_URL) and
+// localhost dev default. Injecting MOLECULE_API_URL at container provision
+// is handled by platform/internal/provisioner/provisioner.go.
 export const PLATFORM_URL =
+  process.env.MOLECULE_API_URL ||
   process.env.MOLECULE_URL ||
   process.env.PLATFORM_URL ||
   "http://localhost:8080";

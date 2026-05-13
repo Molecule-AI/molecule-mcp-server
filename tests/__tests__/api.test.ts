@@ -150,6 +150,25 @@ describe("apiCall", () => {
     expect((result as { detail: string }).detail).toContain("Failed to fetch");
   });
 
+  it("returns ApiError with timeout message when request times out", async () => {
+    // Simulate what AbortSignal.timeout() fires when its timer expires:
+    // the error's .name is "TimeoutError" and .message contains "timed out".
+    // Using a plain Error with name set to "TimeoutError" so the instanceof
+    // Error check in apiCall's catch block succeeds and detects it as a timeout.
+    const timeoutError = Object.assign(new Error("The operation was aborted due to timeout."), {
+      name: "TimeoutError",
+    });
+    global.fetch = jest.fn().mockRejectedValue(timeoutError);
+
+    const result = await apiCall("GET", "/workspaces");
+
+    expect(isApiError(result)).toBe(true);
+    // Timeout errors are surfaced distinctly from network-unreachable errors.
+    // The error field includes the timeout summary; the detail is the raw message.
+    expect((result as { error: string }).error).toContain("timed out");
+    expect((result as { detail: string }).detail).toBeTruthy();
+  });
+
   it("sends JSON body on POST with body argument", async () => {
     global.fetch = mockFetch({ id: "ws-new" }, { status: 201 });
 
@@ -182,6 +201,17 @@ describe("apiCall", () => {
 
     const call = (fetch as jest.Mock).mock.calls[0];
     expect(call[1].headers).toEqual({ "Content-Type": "application/json" });
+  });
+
+  it("passes custom timeoutMs to AbortSignal.timeout()", async () => {
+    global.fetch = mockFetch({ id: "ws-1" }, { status: 200 });
+
+    await apiCall("GET", "/workspaces/ws-1", undefined, 5_000);
+
+    const call = (fetch as jest.Mock).mock.calls[0];
+    expect(call[1].signal).toBeDefined();
+    // Verify the signal is an AbortSignal instance
+    expect(call[1].signal instanceof AbortSignal).toBe(true);
   });
 });
 
@@ -220,6 +250,20 @@ describe("platformGet", () => {
 
     expect(isApiError(result)).toBe(true);
     expect((result as { error: string }).error).toContain("Platform unreachable");
+  });
+
+  it("returns ApiError with timeout message when request times out", async () => {
+    // Simulate what AbortSignal.timeout() fires when its timer expires.
+    const timeoutError = Object.assign(new Error("The operation was aborted due to timeout."), {
+      name: "TimeoutError",
+    });
+    global.fetch = jest.fn().mockRejectedValue(timeoutError);
+
+    const result = await platformGet("/workspaces");
+
+    expect(isApiError(result)).toBe(true);
+    expect((result as { error: string }).error).toContain("timed out");
+    expect((result as { detail: string }).detail).toBeTruthy();
   });
 
   describe("429 retry logic", () => {

@@ -158,22 +158,24 @@ convention in CLAUDE.md.
 ## KI-006 — `anyOf` schemas cause `INVALID_ARGUMENTS` on valid inputs
 
 **File:** `src/tools/plugins.ts`, `src/tools/workspaces.ts`
-**Status:** Resolved (PR: `fix/kind-ki006-anyof` #5)
+**Status:** Resolved
+**Resolved in:** PR `fix/kind-ki006-anyof` (#5, plugins.ts) and PR #10 (workspaces.ts)
 **Severity:** Medium
 
 ### Resolution
-The root cause was `z.string().optional().nullable()` (zod chain order) in the
-`update_workspace` tool's `parent_id` schema. `zod-to-json-schema` with
-`strictUnions: true` produces `anyOf` for the `optional().nullable()` chain, but
-`nullable().optional()` produces a clean `type: ["string","null"]` with no `anyOf`.
+The root cause is `z.string().optional().nullable()` (zod chain order).
+`zod-to-json-schema` with `strictUnions: true` produces `anyOf` for the
+`optional().nullable()` chain, but `nullable().optional()` produces a clean
+`type: ["string","null"]` with no `anyOf`.
 
-Fix: changed `z.string().nullable().optional()` → `z.string().optional().nullable()`
-in `src/tools/workspaces.ts:122`. Semantically equivalent (string | null | undefined),
-no runtime behaviour change.
+- **plugins.ts:** already used safe `nullable().optional()` order (PR #5).
+- **workspaces.ts:** `parent_id: z.string().optional().nullable()` → `z.string().nullable().optional()`.
+  Semantically equivalent (string | null | undefined); no runtime behaviour change.
 
-Regression guard added in `tests/__tests__/plugins-schema.test.ts`: mirrors all 6
-plugin tool schemas and asserts no `anyOf` in JSON Schema output. Includes a control
-test documenting the known `optional().nullable()` zod-to-json-schema quirk.
+Regression guard in `tests/__tests__/plugins-schema.test.ts`: mirrors all 6
+plugin tool schemas and the `update_workspace` workspace schema; asserts no
+`anyOf` in JSON Schema output. Includes a control test documenting the
+`optional().nullable()` → `anyOf` quirk.
 
 ---
 

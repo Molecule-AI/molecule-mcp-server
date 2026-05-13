@@ -55,10 +55,37 @@ describe("KI-006: plugin tool schemas are anyOf-free", () => {
   } as const;
 
   // -------------------------------------------------------------------------
+  // Schema fixtures — mirrors src/tools/workspaces.ts
+  // -------------------------------------------------------------------------
+
+  const workspaceSchemas = {
+    update_workspace: z.object({
+      workspace_id: z.string(),
+      name: z.string().optional(),
+      role: z.string().optional(),
+      tier: z.number().optional(),
+      // NOTE: nullable must come BEFORE optional in the Zod chain.
+      // z.string().optional().nullable() → zod-to-json-schema produces `anyOf`,
+      // which causes INVALID_ARGUMENTS on valid null/undefined inputs in some
+      // MCP hosts. The safe order is z.string().nullable().optional().
+      parent_id: z.string().nullable().optional().describe("Set parent for nesting, null to un-nest"),
+    }),
+  } as const;
+
+  // -------------------------------------------------------------------------
   // Tests
   // -------------------------------------------------------------------------
 
   for (const [tool, schema] of Object.entries(schemas)) {
+    describe(tool, () => {
+      const json = zodToJsonSchema(schema, { strictUnions: true });
+      it("has no anyOf", () => {
+        expect(hasAnyOf(json)).toBe(false);
+      });
+    });
+  }
+
+  for (const [tool, schema] of Object.entries(workspaceSchemas)) {
     describe(tool, () => {
       const json = zodToJsonSchema(schema, { strictUnions: true });
       it("has no anyOf", () => {

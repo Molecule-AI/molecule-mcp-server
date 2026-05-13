@@ -2,6 +2,26 @@
 
 MCP server that exposes Molecule AI platform operations as tools for AI coding agents.
 
+Published as [`@molecule-ai/mcp-server`](https://www.npmjs.com/package/@molecule-ai/mcp-server) on npm.
+
+## Install
+
+**Via npm** (recommended for users):
+
+```bash
+npm install @molecule-ai/mcp-server
+```
+
+Then configure your MCP host (see [Setup](#setup) below). The server entry point is `node_modules/.bin/mcp-server` or `node_modules/@molecule-ai/mcp-server/dist/index.js`.
+
+**From source** (for contributors):
+
+```bash
+git clone https://git.moleculesai.app/molecule-ai/molecule-mcp-server.git
+cd molecule-mcp-server
+npm install && npm run build
+```
+
 ## 87 Tools Available
 
 See the [full tool registry](CLAUDE.md#mcp-tool-registry) for all tools. Highlights:
@@ -23,7 +43,7 @@ See the [full tool registry](CLAUDE.md#mcp-tool-registry) for all tools. Highlig
 
 ## Setup
 
-### Claude Code
+### Claude Code / Claude Desktop
 
 Add to your project's `.mcp.json`:
 
@@ -32,14 +52,18 @@ Add to your project's `.mcp.json`:
   "mcpServers": {
     "molecule": {
       "command": "node",
-      "args": ["./mcp-server/dist/index.js"],
+      "args": ["node_modules/.bin/mcp-server"],
       "env": {
-        "MOLECULE_API_URL": "http://localhost:8080"
+        "MOLECULE_API_URL": "http://localhost:8080",
+        "MOLECULE_API_KEY": "your-api-key"
       }
     }
   }
 }
 ```
+
+On macOS the config lives at `~/Library/Application Support/Claude/claude_desktop_config.json`;
+on Linux at `~/.config/Claude/claude_desktop_config.json`.
 
 ### Cursor
 
@@ -50,9 +74,10 @@ Add to `.cursor/mcp.json`:
   "mcpServers": {
     "molecule": {
       "command": "node",
-      "args": ["./mcp-server/dist/index.js"],
+      "args": ["node_modules/.bin/mcp-server"],
       "env": {
-        "MOLECULE_API_URL": "http://localhost:8080"
+        "MOLECULE_API_URL": "http://localhost:8080",
+        "MOLECULE_API_KEY": "your-api-key"
       }
     }
   }
@@ -62,7 +87,7 @@ Add to `.cursor/mcp.json`:
 ### Codex / OpenCode
 
 ```bash
-MOLECULE_API_URL=http://localhost:8080 node mcp-server/dist/index.js
+MOLECULE_API_URL=http://localhost:8080 MOLECULE_API_KEY=your-key node node_modules/.bin/mcp-server
 ```
 
 ## Environment Variables
@@ -75,9 +100,9 @@ MOLECULE_API_URL=http://localhost:8080 node mcp-server/dist/index.js
 
 ## Quick Start
 
-1. `npm install && npm run build`
-2. Set `MOLECULE_API_URL` and `MOLECULE_API_KEY`
-3. `npm start` (stdio mode) or use an MCP host config
+1. `npm install @molecule-ai/mcp-server` (or build from source — see above)
+2. Set `MOLECULE_API_URL` and `MOLECULE_API_KEY` env vars
+3. Configure your MCP host (see [Setup](#setup))
 
 ## Examples
 

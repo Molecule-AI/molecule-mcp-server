@@ -8,7 +8,9 @@ export async function handleAsyncDelegate(params: {
   task: string;
 }) {
   const { workspace_id, target_id, task } = params;
-  const data = await apiCall("POST", `/workspaces/${workspace_id}/delegate`, { target_id, task });
+  // Delegation can trigger multi-step agent chains — use a 5-minute timeout to avoid
+  // premature failures on complex cross-workspace workflows.
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/delegate`, { target_id, task }, 300_000);
   return toMcpResult(data);
 }
 

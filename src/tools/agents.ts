@@ -48,6 +48,8 @@ export type GetModelParams = z.infer<typeof GetModelSchema>;
 
 export async function handleChatWithAgent(args: unknown): Promise<ReturnType<typeof toMcpResult>> {
   const params = validate(args, ChatWithAgentSchema);
+  // Agent chat can involve multi-turn LLM inference — allow up to 2 min rather
+  // than the 30 s default so complex tasks don't time out mid-generation.
   const data = await apiCall<
     { result?: { parts?: Array<{ kind?: string; text?: string }> } }
   >(
@@ -59,6 +61,7 @@ export async function handleChatWithAgent(args: unknown): Promise<ReturnType<typ
         message: { role: "user", parts: [{ type: "text", text: params.message }] },
       },
     },
+    120_000, // 2-minute timeout for agent chat
   );
   const parts =
     (data as { result?: { parts?: Array<{ kind?: string; text?: string }> } } | null)?.result?.parts || [];

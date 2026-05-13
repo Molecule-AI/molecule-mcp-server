@@ -45,16 +45,24 @@ export function toMcpText(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+// Default per-request timeout for all API calls (30 s). Covers the 99th-percentile
+// platform response under normal load; long-running operations (bundle export,
+// agent chat) should pass a larger timeout via the caller's context.
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export async function apiCall<T = unknown>(
   method: string,
   path: string,
   body?: unknown,
+  timeoutMs?: number,
 ): Promise<T | ApiError> {
+  const timeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;
   try {
     const res = await fetch(`${PLATFORM_URL}${path}`, {
       method,
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(timeout),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -68,7 +76,12 @@ export async function apiCall<T = unknown>(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const isTimeout =
+      err instanceof Error && (err.name === "TimeoutError" || msg.includes("timed out"));
     logError(err, `Molecule AI API error (${method} ${path})`, { platformUrl: PLATFORM_URL });
+    if (isTimeout) {
+      return { error: `Request timed out after ${timeout} ms (${method} ${path})`, detail: msg };
+    }
     return { error: `Platform unreachable at ${PLATFORM_URL}`, detail: msg };
   }
 }
@@ -88,7 +101,9 @@ export async function apiCall<T = unknown>(
 export async function platformGet<T = unknown>(
   path: string,
   maxRetries = 3,
+  timeoutMs?: number,
 ): Promise<T | ApiError> {
+  const timeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let attempt = 0;
 
   while (true) {
@@ -96,6 +111,7 @@ export async function platformGet<T = unknown>(
       const res = await fetch(`${PLATFORM_URL}${path}`, {
         method: "GET",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(timeout),
       });
 
       if (res.status === 429 && attempt < maxRetries) {
@@ -137,7 +153,15 @@ export async function platformGet<T = unknown>(
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const isTimeout =
+        err instanceof Error && (err.name === "TimeoutError" || msg.includes("timed out"));
       logError(err, `Molecule AI API error (GET ${path})`, { platformUrl: PLATFORM_URL });
+      if (isTimeout) {
+        return {
+          error: `Request timed out after ${timeout} ms (GET ${path})`,
+          detail: msg,
+        };
+      }
       return { error: `Platform unreachable at ${PLATFORM_URL}`, detail: msg };
     }
   }

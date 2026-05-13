@@ -290,3 +290,99 @@ describe("platformGet", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// remote_agents — handleGetRemoteAgentSetupCommand
+// ---------------------------------------------------------------------------
+
+// remote_agents.ts reads PLATFORM_URL at module-load time from process.env.
+// We use jest.isolateModules so each test gets a fresh module context with
+// the right env var set before the module is loaded.
+const originalEnv = process.env.MOLECULE_API_URL;
+
+describe("handleGetRemoteAgentSetupCommand", () => {
+  beforeEach(() => {
+    jest.resetModules();
+    process.env.MOLECULE_API_URL = "http://localhost:8080";
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.MOLECULE_API_URL;
+    } else {
+      process.env.MOLECULE_API_URL = originalEnv;
+    }
+  });
+
+  async function loadHandlerAndMock(workspace: Record<string, unknown>) {
+    let handler!: typeof import("../../src/tools/remote_agents").handleGetRemoteAgentSetupCommand;
+    let mockGet!: jest.Mock;
+    await new Promise<void>((resolve) => {
+      jest.isolateModules(() => {
+        mockGet = jest.fn().mockResolvedValue(workspace);
+        jest.mock("../../src/api", () => ({
+          ...jest.requireActual("../../src/api"),
+          platformGet: mockGet,
+        }));
+        const mod = require("../../src/tools/remote_agents");
+        handler = mod.handleGetRemoteAgentSetupCommand;
+        resolve();
+      });
+    });
+    return { handler, mockGet };
+  }
+
+  it("generates valid Python command with constructor + register pattern", async () => {
+    const { handler } = await loadHandlerAndMock({
+      id: "ws-abc123",
+      name: "my-agent",
+      runtime: "external",
+    });
+    const result = await handler({ workspace_id: "ws-abc123" });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.workspace_id).toBe("ws-abc123");
+    expect(parsed.workspace_name).toBe("my-agent");
+    expect(parsed.setup_command).toContain("RemoteAgentClient(workspace_id='ws-abc123'");
+    expect(parsed.setup_command).not.toContain("register_from_env");
+    expect(parsed.setup_command).toContain("register()");
+  });
+
+  it("warns when PLATFORM_URL is localhost and no override is given", async () => {
+    const { handler } = await loadHandlerAndMock({
+      id: "ws-abc123",
+      name: "my-agent",
+      runtime: "external",
+    });
+    const result = await handler({ workspace_id: "ws-abc123" });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.warnings).toBeDefined();
+    expect(parsed.warnings![0]).toContain("localhost");
+  });
+
+  it("uses platform_url_override when provided", async () => {
+    const { handler } = await loadHandlerAndMock({
+      id: "ws-abc123",
+      name: "my-agent",
+      runtime: "external",
+    });
+    const result = await handler({
+      workspace_id: "ws-abc123",
+      platform_url_override: "https://platform.example.com",
+    });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.setup_command).toContain("platform_url='https://platform.example.com'");
+    expect(parsed.warnings).toBeUndefined();
+  });
+
+  it("returns error when workspace is not runtime=external", async () => {
+    const { handler } = await loadHandlerAndMock({
+      id: "ws-abc123",
+      name: "my-agent",
+      runtime: "docker",
+    });
+    const result = await handler({ workspace_id: "ws-abc123" });
+    const parsed = JSON.parse((result.content[0] as { text: string }).text);
+    expect(parsed.error).toContain("not external");
+    expect(parsed.setup_command).toBeUndefined();
+  });
+});

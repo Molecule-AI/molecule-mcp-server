@@ -90,13 +90,14 @@ export async function handleGetRemoteAgentSetupCommand(params: {
     `WORKSPACE_ID=${w.id} \\`,
     `PLATFORM_URL=${targetUrl} \\`,
     `python3 -c "from molecule_agent import RemoteAgentClient; \\`,
-    `  c = RemoteAgentClient.register_from_env(); \\`,
+    `  c = RemoteAgentClient(workspace_id='${w.id}', platform_url='${targetUrl}'); \\`,
+    `  if c.load_token() is None: c.register(); \\`,
     `  c.pull_secrets(); \\`,
     `  c.run_heartbeat_loop()"`,
     ``,
     `# For a richer demo (logging, graceful shutdown) see`,
     `# examples/remote-agent/run.py in the molecule-sdk-python checkout.`,
-    `# The agent will register, mint its bearer token (cached at`,
+    `# The agent will register (mint + cache bearer token at`,
     `# ~/.molecule/${w.id}/.auth_token), pull secrets, then heartbeat.`,
   ].join("\n");
   return toMcpResult({

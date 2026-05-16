@@ -180,21 +180,21 @@ test documenting the known `optional().nullable()` zod-to-json-schema quirk.
 ## KI-007 — MCP server heartbeat tools are read-only; actual heartbeat lives in the Python SDK
 
 **File:** `src/tools/remote_agents.ts` (heartbeat tool)
-**Status:** Resolved — clarified scope
+**Status:** ✅ Resolved
 **Severity:** Low
 
-### Clarification
+### Resolution
 The MCP server's remote-agent tools (`list_remote_agents`, `get_remote_agent_state`,
 `check_remote_agent_freshness`, `get_remote_agent_setup_command`) are **read-only
 queries** — they do not drive any background heartbeat loop. The actual
-`run_heartbeat_loop()` that sends heartbeats from a remote agent lives in the
-Python SDK (`molecule_sdk_python/molecule_agent/client.py`).
+`run_heartbeat_loop()` lives in the Python SDK's `molecule_agent/client.py`
+(standalone `molecule-sdk-python` repo).
 
 The heartbeat cleanup issue (heartbeat loop continues after the controlling MCP
-client disconnects) is tracked as **SDK KI-009** in `molecule-sdk-python/known-issues.md`.
-
-### Suggested fix (SDK side)
-Expose a `stop_event` parameter or `stop()` method on `RemoteAgentClient` so the
-callers (MCP client, shell wrapper) can signal the loop to exit cleanly. The
-Python SDK's `run_heartbeat_loop()` should check `threading.Event` or accept a
-`stop_on: asyncio.Event` argument. See `molecule-sdk-python/known-issues.md`.
+client disconnects) was tracked as **SDK KI-009**. It has been resolved:
+`RemoteAgentClient.run_heartbeat_loop()` and `run_agent_loop()` now accept a
+`stop_event: threading.Event | None` parameter. Callers signal clean shutdown by
+calling `stop_event.set()` from a SIGTERM handler or another thread. The loop
+checks the event at the start of each iteration (before `max_iterations`) and
+exits with return value `"stopped"`. See `molecule-sdk-python`'s
+`known-issues.md` (KI-009 resolved) and `molecule_agent/__init__.py` for usage.

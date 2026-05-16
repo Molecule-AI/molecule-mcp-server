@@ -31,12 +31,10 @@ jobs:
           QUEUE_LABEL: merge-queue
           HOLD_LABEL: merge-queue-hold
           UPDATE_STYLE: merge
-          # Context names from Gitea's status API — verified 2026-05-16 against
-          # https://git.moleculesai.app/api/v1/repos/Molecule-AI/molecule-mcp-server/statuses/main.
-          # Gitea reports "(push)" for CI jobs triggered by the merge-queue schedule
-          # (not "(pull_request)" — that suffix is only for PR-head-triggered runs).
-          # The queue script also checks the SOP gate's status posted to
-          # sop-checklist / all-items-acked (pull_request).
+          # Context names: CI workflow is "CI", job is "test" → "CI / test".
+          # The CI workflow (.gitea/workflows/ci.yml) triggers on pull_request events,
+          # so Gitea posts statuses with the "(pull_request)" suffix.
+          # The queue script also checks the SOP gate: sop-checklist / all-items-acked (pull_request).
           REQUIRED_CONTEXTS: >-
-            CI / test (push), sop-checklist / all-items-acked (pull_request)
+            CI / test (pull_request), sop-checklist / all-items-acked (pull_request)
         run: python3 .gitea/scripts/gitea-merge-queue.py

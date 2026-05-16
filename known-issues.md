@@ -188,13 +188,17 @@ The MCP server's remote-agent tools (`list_remote_agents`, `get_remote_agent_sta
 `check_remote_agent_freshness`, `get_remote_agent_setup_command`) are **read-only
 queries** — they do not drive any background heartbeat loop. The actual
 `run_heartbeat_loop()` that sends heartbeats from a remote agent lives in the
-Python SDK (`molecule_sdk_python/molecule_agent/client.py`).
+Python SDK's `molecule_agent/client.py` (standalone `molecule-sdk-python` repo).
 
 The heartbeat cleanup issue (heartbeat loop continues after the controlling MCP
-client disconnects) is tracked as **SDK KI-009** in `molecule-sdk-python/known-issues.md`.
+client disconnects) is tracked as **SDK KI-009** in the `molecule-sdk-python`
+repo's `known-issues.md`. The Python SDK lives in the `molecule-sdk-python`
+standalone repo; the `RemoteAgentClient` class is at `molecule_agent/client.py`
+(not the old monorepo path `sdk/python/molecule_agent/`).
 
 ### Suggested fix (SDK side)
 Expose a `stop_event` parameter or `stop()` method on `RemoteAgentClient` so the
 callers (MCP client, shell wrapper) can signal the loop to exit cleanly. The
 Python SDK's `run_heartbeat_loop()` should check `threading.Event` or accept a
-`stop_on: asyncio.Event` argument. See `molecule-sdk-python/known-issues.md`.
+`stop_on: asyncio.Event` argument. See the `molecule-sdk-python` repo's
+`known-issues.md` (KI-009 there).

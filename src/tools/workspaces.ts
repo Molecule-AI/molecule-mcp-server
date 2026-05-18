@@ -1,6 +1,43 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { apiCall, platformGet, toMcpResult } from "../api.js";
+import { apiCall, platformGet, toMcpResult, isApiError } from "../api.js";
+
+// Supported runtimes the platform provisioner will honor. Mirrors the
+// workspace-server allowlist (`internal/handlers/runtime_registry.go`
+// fallbackRuntimes + the template-derived set). This is the *client-side*
+// fail-closed guard for the provision_workspace tool: the orchestrator
+// gets a clear INVALID_ARGUMENTS instead of the platform silently
+// coercing an unknown/empty runtime to langgraph (the #184 / control-
+// plane #188 footgun). It is intentionally NOT the authoritative list —
+// the platform must still hard-gate (controlplane#188) — but it stops
+// the most common caller mistake (typo / omitted runtime) at the door.
+export const SUPPORTED_RUNTIMES = [
+  "claude-code",
+  "codex",
+  "hermes",
+  "openclaw",
+  "langgraph",
+  "autogen",
+  "crewai",
+  "deepagents",
+  "kimi",
+  "kimi-cli",
+  "external",
+] as const;
+
+// Canonical default template per runtime. The product "New Workspace"
+// dialog sends a `template` (e.g. "claude-code-default"); the workspace-
+// server derives the runtime from the template's config.yaml. Sending
+// BOTH (template + runtime) is the most robust call: template drives the
+// correct config/image, runtime is the assertion target for the
+// request==delivered echo-back check below.
+function defaultTemplateFor(runtime: string): string {
+  // BYO-compute meta-runtimes have no template repo.
+  if (runtime === "external" || runtime === "kimi" || runtime === "kimi-cli") {
+    return "";
+  }
+  return `${runtime}-default`;
+}
 
 export async function handleListWorkspaces() {
   const data = await platformGet("/workspaces");
@@ -30,6 +67,151 @@ export async function handleCreateWorkspace(params: {
     canvas: initialCanvasPosition(),
   });
   return toMcpResult(data);
+}
+
+/**
+ * provision_workspace — agent-facing, fail-closed workspace provisioning.
+ *
+ * Why this exists (separate from create_workspace): the orchestrator needs
+ * to bring up the production agent team with a SPECIFIC runtime
+ * (claude-code / codex / hermes / openclaw / ...). Both the CP-direct
+ * path AND the raw create path can return success while silently
+ * delivering a langgraph workspace when the runtime can't be resolved
+ * (#184 / molecule-controlplane#188). A "201 but wrong runtime" is a
+ * contract violation, not a degraded success.
+ *
+ * This tool enforces the same fail-closed contract on the client side:
+ *   1. Validate `runtime` against SUPPORTED_RUNTIMES — reject unknown
+ *      BEFORE any platform call (the SDK schema enum also enforces this;
+ *      this is defense-in-depth + a clearer error).
+ *   2. Call the correct PRODUCT create path (POST /workspaces with both
+ *      `template` and `runtime`), NOT the CP-direct
+ *      /cp/workspaces/provision path the orchestrator had been forced to
+ *      use. Template drives the correct config/image; runtime is the
+ *      assertion target.
+ *   3. Read the created workspace back and assert resolved runtime ==
+ *      requested runtime. On mismatch (or no runtime echoed) return a
+ *      structured FAILED-CLOSED error with the resolved value so the
+ *      caller can NOT mistake a langgraph fallback for success.
+ *
+ * The platform-side hard-gate is still required (controlplane#188 +
+ * its workspace-server sibling) — this tool does not substitute for it,
+ * it makes the agent-facing surface honest in the meantime.
+ */
+export async function handleProvisionWorkspace(params: {
+  name: string;
+  runtime: string;
+  template?: string;
+  tier?: number;
+  role?: string;
+  parent_id?: string;
+  workspace_dir?: string;
+  workspace_access?: "none" | "read_only" | "read_write";
+}) {
+  const { name, runtime, tier, role, parent_id, workspace_dir, workspace_access } = params;
+
+  // (1) Fail-closed runtime validation BEFORE any side effect.
+  if (!(SUPPORTED_RUNTIMES as readonly string[]).includes(runtime)) {
+    return toMcpResult({
+      error: "UNSUPPORTED_RUNTIME",
+      detail: `runtime "${runtime}" is not supported; supported: ${SUPPORTED_RUNTIMES.join(", ")}`,
+      requested_runtime: runtime,
+      provisioned: false,
+    });
+  }
+
+  // (2) Resolve template. Caller may override; default is the canonical
+  // "<runtime>-default" template the product UI uses. Sending both
+  // template + runtime is the most robust call (template → correct
+  // config/image, runtime → assertion target).
+  const template = params.template ?? defaultTemplateFor(runtime);
+
+  const created = await apiCall("POST", "/workspaces", {
+    name,
+    role,
+    template: template || undefined,
+    tier,
+    parent_id,
+    runtime,
+    workspace_dir,
+    workspace_access,
+    canvas: initialCanvasPosition(),
+  });
+
+  if (isApiError(created)) {
+    return toMcpResult({
+      error: "PROVISION_FAILED",
+      detail: created,
+      requested_runtime: runtime,
+      provisioned: false,
+    });
+  }
+
+  const createdObj = (created ?? {}) as Record<string, unknown>;
+  const workspaceId =
+    typeof createdObj.id === "string" ? createdObj.id : undefined;
+
+  if (!workspaceId) {
+    return toMcpResult({
+      error: "PROVISION_FAILED",
+      detail: "create succeeded but no workspace id returned; cannot verify resolved runtime",
+      requested_runtime: runtime,
+      create_response: created,
+      provisioned: false,
+    });
+  }
+
+  // (3) Read back and assert request == delivered. The create response
+  // does not always echo the persisted runtime, so re-fetch the row.
+  const fetched = await platformGet(`/workspaces/${workspaceId}`);
+  let resolvedRuntime: string | undefined;
+  if (!isApiError(fetched) && fetched && typeof fetched === "object") {
+    const f = fetched as Record<string, unknown>;
+    if (typeof f.runtime === "string") resolvedRuntime = f.runtime;
+  }
+
+  // BYO-compute runtimes may be normalized (e.g. "" -> "external");
+  // treat the requested value as authoritative for those.
+  const requestedIsByo =
+    runtime === "external" || runtime === "kimi" || runtime === "kimi-cli";
+
+  if (resolvedRuntime === undefined) {
+    return toMcpResult({
+      error: "PROVISION_UNVERIFIED",
+      detail:
+        "workspace was created but its resolved runtime could not be read back; " +
+        "treat as NOT verified — do not assume the requested runtime was honored",
+      workspace_id: workspaceId,
+      requested_runtime: runtime,
+      provisioned: false,
+    });
+  }
+
+  if (!requestedIsByo && resolvedRuntime !== runtime) {
+    return toMcpResult({
+      error: "RUNTIME_MISMATCH",
+      detail:
+        `requested runtime "${runtime}" but the platform provisioned ` +
+        `"${resolvedRuntime}" (silent fallback — this is the #184 / ` +
+        `controlplane#188 contract violation). The workspace exists but ` +
+        `is the WRONG runtime; delete it and escalate (platform hard-gate ` +
+        `not yet shipped).`,
+      workspace_id: workspaceId,
+      requested_runtime: runtime,
+      resolved_runtime: resolvedRuntime,
+      provisioned: false,
+    });
+  }
+
+  return toMcpResult({
+    ok: true,
+    provisioned: true,
+    workspace_id: workspaceId,
+    requested_runtime: runtime,
+    resolved_runtime: resolvedRuntime,
+    template: template || null,
+    status: createdObj.status ?? "provisioning",
+  });
 }
 
 export async function handleGetWorkspace(params: { workspace_id: string }) {
@@ -88,6 +270,30 @@ export function registerWorkspaceTools(srv: McpServer) {
       workspace_access: z.enum(["none", "read_only", "read_write"]).optional().describe("Filesystem access mode for /workspace"),
     },
     handleCreateWorkspace
+  );
+
+  srv.tool(
+    "provision_workspace",
+    "Provision a workspace with a SPECIFIC runtime (claude-code, codex, hermes, openclaw, langgraph, autogen, crewai, deepagents) via the correct product create path. Fail-closed: validates the runtime, then reads the created workspace back and returns an error (not a success) if the platform silently fell back to a different runtime. Use this — not create_workspace — when the runtime must be guaranteed.",
+    {
+      name: z.string().describe("Workspace name"),
+      runtime: z
+        .enum(SUPPORTED_RUNTIMES)
+        .describe("Required runtime — provisioning fails closed if it cannot be honored"),
+      template: z
+        .string()
+        .optional()
+        .describe("Template name (defaults to '<runtime>-default'); overrides runtime-derived template"),
+      tier: z.number().min(1).max(4).optional().describe("Tier (1=basic, 2=browser, 3=desktop, 4=VM). SaaS forces T4."),
+      role: z.string().optional().describe("Role description"),
+      parent_id: z.string().optional().describe("Parent workspace ID for nesting"),
+      workspace_dir: z.string().optional().describe("Host path to bind-mount at /workspace"),
+      workspace_access: z
+        .enum(["none", "read_only", "read_write"])
+        .optional()
+        .describe("Filesystem access mode for /workspace"),
+    },
+    handleProvisionWorkspace
   );
 
   srv.tool(
